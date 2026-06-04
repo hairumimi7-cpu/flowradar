@@ -4380,6 +4380,165 @@ function selectFolder(name){
   renderMyHeatmap();
 }
 
+// ══ 누락 함수 추가 ══
+
+function updateTmBreadcrumb(level, ticker, sectorName, subIdx, subName){
+  const bc = G('tm-breadcrumb');
+  if(!bc) return;
+  if(level === 'root'){
+    bc.innerHTML = '<span style="color:var(--text-dim)">섹터 클릭 →</span>';
+  } else if(level === 'sector'){
+    bc.innerHTML = `<span style="color:var(--text-dim)">섹터 클릭 → </span><span style="color:var(--accent)">${sectorName}</span> <span style="color:var(--text-dim)">→ 소섹터 클릭</span>`;
+  } else if(level === 'sub'){
+    bc.innerHTML = `<span style="color:var(--text-dim)">섹터 → </span><span style="color:var(--accent)" onclick="handleTmClick('${ticker}','${sectorName}',0)" style="cursor:pointer">${sectorName}</span> <span style="color:var(--text-dim)">›</span> <span style="color:var(--gold)">${subName||''}</span>`;
+  }
+}
+
+function renderMyHeatmap(){
+  const el = G('my-heatmap');
+  const empty = G('my-empty');
+  if(!el) return;
+  
+  const list = curFolder ? watchlist.filter(w=>w.folder===curFolder) : watchlist;
+  
+  if(!list.length){
+    if(empty) empty.style.display='block';
+    return;
+  }
+  if(empty) empty.style.display='none';
+  
+  // 요약
+  const ups = list.filter(w=>w.chg&&w.chg>0).length;
+  const dns = list.filter(w=>w.chg&&w.chg<0).length;
+  const avg = list.filter(w=>w.chg).reduce((s,w)=>s+(w.chg||0),0)/Math.max(list.filter(w=>w.chg).length,1);
+  
+  if(G('my-cnt')) G('my-cnt').textContent = list.length;
+  if(G('my-up'))  G('my-up').textContent  = ups;
+  if(G('my-dn'))  G('my-dn').textContent  = dns;
+  if(G('my-avg')){ 
+    G('my-avg').textContent = list.filter(w=>w.chg).length ? fp2(avg) : '--';
+    G('my-avg').style.color = avg>=0?'var(--accent3)':'var(--accent2)';
+  }
+  
+  el.innerHTML = list.map(w=>{
+    const chg = w.chg, px = w.px;
+    const cls = chg===null?'':'chg>=0?"up":"dn"';
+    const cc = chg===null?'var(--text-dim)':chg>=0?'var(--accent3)':'var(--accent2)';
+    const isKr = w.tk&&w.tk.includes('.');
+    const url = isKr ? `https://tossinvest.com/stocks/A${w.tk.replace('.KS','')}` : `https://tossinvest.com/stocks/${w.tk}`;
+    return `<div class="my-card" onclick="window.open('${url}','_blank')">
+      <div class="my-sym">${w.tk||''}</div>
+      <div class="my-nm">${w.nm||''}</div>
+      <div class="my-px">${px?'$'+fp(px,2):'--'}</div>
+      <div class="my-chg" style="color:${cc}">${chg!==null?fp2(chg):'--'}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTreemapKr(data){
+  if(!data||!data.length) return;
+  const wrap = G('tm-svg-wrap-kr');
+  if(!wrap) return;
+  
+  const W = Math.max(300, wrap.clientWidth||700);
+  const H = Math.max(380, Math.round(W*0.62));
+  
+  const KR_SECS_META = [
+    {n:'삼성전자',t:'005930.KS',ic:'📱'},{n:'LG에너지',t:'373220.KS',ic:'🔋'},
+    {n:'삼성바이오',t:'207940.KS',ic:'💊'},{n:'현대차',t:'005380.KS',ic:'🚗'},
+    {n:'NAVER',t:'035420.KS',ic:'🌐'},{n:'KB금융',t:'105560.KS',ic:'🏦'},
+    {n:'POSCO홀딩스',t:'005490.KS',ic:'⚙️'},{n:'LG화학',t:'051910.KS',ic:'🧪'},
+    {n:'카카오',t:'041510.KS',ic:'💬'},{n:'한화에어로',t:'012450.KS',ic:'✈️'},
+    {n:'현대건설',t:'000720.KS',ic:'🏗️'}
+  ];
+  
+  const items = KR_SECS_META.map((s,i)=>({
+    name:s.n, ticker:s.t, ic:s.ic,
+    chg: data[i]?data[i].change:0,
+    value: 1/(i+1)
+  }));
+  
+  const rects = squarify(items,0,0,W,H);
+  let svg='';
+  rects.forEach(r=>{
+    const color=getHeatColor(r.chg);
+    const tw=r.w-4,th=r.h-4;
+    const showNm=tw>30&&th>20, showChg=tw>30&&th>34;
+    svg+=`<g class="tm-sector" onclick="handleTmClickKr('${r.ticker}','${r.name}',${r.chg})">
+      <rect x="${r.x}" y="${r.y}" width="${r.w-1}" height="${r.h-1}" rx="3" fill="${color}" stroke="var(--bg)" stroke-width="1.5"/>
+      ${showNm?`<text x="${r.x+r.w/2}" y="${r.y+r.h/2-(showChg?7:0)}" class="tm-label-sec" text-anchor="middle" dominant-baseline="middle" style="font-size:9px">${r.name}</text>`:''}
+      ${showChg?`<text x="${r.x+r.w/2}" y="${r.y+r.h/2+10}" class="tm-label-chg" text-anchor="middle" style="font-size:8px">${fp2(r.chg)}</text>`:''}
+    </g>`;
+  });
+  
+  wrap.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${svg}</svg>`;
+}
+
+function handleTmClickKr(ticker, name, chg){
+  try{ closeTmSubPanelKr(); }catch(e){}
+  const subs = SUBSECTORS[ticker];
+  if(!subs||!subs.length) return;
+  openTmSubPanelKr(ticker, name, subs);
+}
+
+async function loadKrIdx(){
+  try{
+    const res = await fetch(SERVER_URL+'/api/indices',{signal:AbortSignal.timeout(6000)}).then(r=>r.json());
+    // 한국 지수는 Yahoo로 따로
+    const krIdxs=[
+      {sym:'^KS11',vId:'v-ks',cId:'c-ks'},
+      {sym:'^KQ11',vId:'v-kq',cId:'c-kq'},
+    ];
+    for(const idx of krIdxs){
+      try{
+        const r2=await fetch(SERVER_URL+'/api/quote/'+encodeURIComponent(idx.sym),{signal:AbortSignal.timeout(5000)});
+        const d=await r2.json();
+        if(d&&d.price){
+          const ev=G(idx.vId),ec=G(idx.cId);
+          if(ev)ev.textContent=fp(d.price,0);
+          if(ec){ec.textContent=fp2(d.change);ec.style.color=d.change>=0?'var(--accent3)':'var(--accent2)';}
+        }
+      }catch(e){}
+    }
+  }catch(e){}
+}
+
+async function openTmSubPanelKr(ticker, name, subs){
+  const panel = G('tm-sub-panel-kr');
+  const inner = G('tm-sub-inner-kr');
+  if(!panel||!inner) return;
+  
+  const medals = ['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣'];
+  
+  inner.innerHTML = `
+    <div class="tm-sub-panel-title">
+      <span>대섹터</span>
+      <span style="cursor:pointer;color:var(--accent2);" onclick="closeTmSubPanelKr()">✕</span>
+    </div>
+    <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);margin-bottom:10px;">${name}</div>
+    <div class="tm-sub-compare">
+      <div class="tm-sub-compare-title">📊 강도 비교</div>
+      ${subs.map((s,i)=>`
+        <div class="tm-sub-cmp-row" onclick="loadTmSubStocksKr('${ticker}','${name}',${i})">
+          <div class="tm-sub-cmp-rank">--</div>
+          <div class="tm-sub-cmp-nm">${s.nm}</div>
+          <div class="tm-sub-cmp-bar-wrap"><div class="tm-sub-cmp-bar-track"><div class="tm-sub-cmp-bar-fill" style="width:0%;"></div></div></div>
+          <div class="tm-sub-cmp-val" style="color:var(--text-dim);">--</div>
+        </div>`).join('')}
+    </div>
+    ${subs.map((s,i)=>`
+      <button class="tm-sub-btn" id="tm-sub-btn-kr-${i}" onclick="loadTmSubStocksKr('${ticker}','${name}',${i})">
+        ${s.nm}<div style="font-size:9px;color:var(--text-dim);margin-top:2px;">${s.stocks.length}개 종목</div>
+      </button>`).join('')}
+  `;
+  panel.classList.add('open');
+}
+
+function closeTmSubPanelKr(){
+  const p = G('tm-sub-panel-kr');
+  if(p) p.classList.remove('open');
+}
+
 </script>
 </div>
 </body>
